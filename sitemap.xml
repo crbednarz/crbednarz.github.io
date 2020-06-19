@@ -1,9 +1,28 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:schemaLocation="http://www.sitemaps.org/schemas/sitemap/0.9 http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd" xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
 <url>
+<loc>http://crbednarz.com/blog/2020/06/18/bringing-terrarias-rgb-lighting-to-new-devices/</loc>
+<lastmod>2020-06-18T20:22:40-07:00</lastmod>
+</url>
+<url>
 <loc>http://crbednarz.com/blog/archives/</loc>
 </url>
 <url>
 <loc>http://crbednarz.com/</loc>
+</url>
+<url>
+<loc>http://crbednarz.com/blog/categories/terraria/</loc>
+</url>
+<url>
+<loc>http://crbednarz.com/blog/categories/embedded/</loc>
+</url>
+<url>
+<loc>http://crbednarz.com/blog/categories/icebreaker/</loc>
+</url>
+<url>
+<loc>http://crbednarz.com/blog/categories/esp32/</loc>
+</url>
+<url>
+<loc>http://crbednarz.com/blog/categories/rgb/</loc>
 </url>
 </urlset>
