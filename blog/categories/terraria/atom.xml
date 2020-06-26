@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="utf-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
 
-  <title><![CDATA[Category: Terraria | Chris Bednarz's Blog]]></title>
+  <title><![CDATA[Category: terraria | Chris Bednarz]]></title>
   <link href="http://crbednarz.com/blog/categories/terraria/atom.xml" rel="self"/>
   <link href="http://crbednarz.com/"/>
-  <updated>2020-06-18T20:23:39-07:00</updated>
+  <updated>2020-06-25T20:55:36-07:00</updated>
   <id>http://crbednarz.com/</id>
   <author>
     <name><![CDATA[Chris Bednarz]]></name>
@@ -14,11 +14,371 @@
 
   
   <entry>
-    <title type="html"><![CDATA[Bringing Terraria's RGB Lighting to New Devices]]></title>
+    <title type="html"><![CDATA[Terraria's Lighting To Other Devices]]></title>
     <link href="http://crbednarz.com/blog/2020/06/18/bringing-terrarias-rgb-lighting-to-new-devices/"/>
     <updated>2020-06-18T20:22:40-07:00</updated>
     <id>http://crbednarz.com/blog/2020/06/18/bringing-terrarias-rgb-lighting-to-new-devices</id>
-    <content type="html"><![CDATA[
+    <content type="html"><![CDATA[<h1>Introduction</h1>
+
+<p>It&rsquo;s been two months since the final update for Terraria was released, and with it a variety of new content and features. Of those, there was one feature which I had worked on quite a bit during my time at Re-Logic which I had been patiently waiting to play with again: Peripheral Lighting. With this, Terraria is able to take control of various &ldquo;RGB&rdquo;-enabled devices such as keyboards, mice, and headsets, and update their colors depending on what&rsquo;s going on in the game.
+Perhaps the whole thing is a bit useless, but I&rsquo;ve always been a sucker for RGB lighting nonetheless.</p>
+
+<p>Unfortunately, since working on it I no longer have any supported devices. In fact, none of my various peripherals support any sort of host controlled lighting. But why should I limit myself to peripherals anyway? The system behind it certainly isn&rsquo;t aware of this constraint, so why can&rsquo;t I make my <em>own</em> RGB device? In theory, so long a device has controllable RGB LEDs, there&rsquo;s a way.</p>
+
+<p><strong>A word of warning:</strong><br/>
+This is by no means meant to be a comprehensive guide, but rather a starting point. I&rsquo;ll cover the key steps required to get things up and running, but things like polish and stability will be left for another time. Additionally, some knowledge of C#, and embedded devices is recommended.</p>
+
+<h1>Targeting A New Device</h1>
+
+<p>To start off simple, we&rsquo;ll look at what it would take to get a strip of ws2812b addressable LEDs working with Terraria. These are fairly common, cheap, and readily available on Amazon.
+Because I&rsquo;m working with what I have laying around, here are the main components I&rsquo;ll be using:</p>
+
+<ul>
+<li><a href="https://www.amazon.com/gp/product/B07FVPN3PH/">16.4ft WS2812B LED Strip (150 LEDs)</a></li>
+<li><a href="https://www.amazon.com/ESP32-PICO-KIT-Development-Bluetooth-ESP32-PICO-D4-USB-UART/dp/B086ZGWH5W/">ESP32-PICO-KIT v4</a> - Any ESP32 will do, although the pins may vary.</li>
+</ul>
+
+
+<p>Additional parts, such as a logic level converter, capacitor, power supply, etc. will be required. Adafruit has a <a href="https://learn.adafruit.com/neopixel-levelshifter">fantastic guide</a> on how to control WS2812B LEDs from a 3.3v microcontroller.</p>
+
+<p>We&rsquo;ll also need some software:</p>
+
+<ul>
+<li><a href="https://visualstudio.microsoft.com/">Visual Studio 2019</a> (Community is fine) with C# development installed and .NET Framework 4.0</li>
+<li><a href="https://www.arduino.cc/en/Main/Software">Arduino IDE</a> with <a href="https://github.com/espressif/arduino-esp32">ESP32 board support</a> installed.</li>
+<li><a href="https://www.jetbrains.com/decompiler/">dotPeek</a> (We use this to extract an embedded resource. Other similar software may be used in its place)</li>
+</ul>
+
+
+<h2>The &ldquo;Chroma&rdquo; System</h2>
+
+<p>Terraria&rsquo;s lighting system is modeled <em>very</em> loosely around a GPU pipeline. Devices define collections of pixels called &ldquo;Fragments&rdquo; which are shaded, blended, and presented to some external system.</p>
+
+<p><img class="center" src="/images/blog/RgbDevice.png" title="&ldquo;RgbDevice Fragment Diagram&rdquo;" ></p>
+
+<p>The pipeline itself is unaware of what it&rsquo;s shading beyond some fragment metadata, so we only need to concern ourselves with creating an RgbDevice for our new target.</p>
+
+<p>This gives us a clear set of goals:<br/>
+1. Find a way to modify Terraria. (Preferably without decompiling/recompiling)<br/>
+2. Add a new RgbDevice type that&rsquo;s capable of sending color data to our a microcontroller.<br/>
+3. Program our microcontroller to receive and use the color data.</p>
+
+<h2>Preparations For Modifying Terraria</h2>
+
+<p>Typically it&rsquo;s much easier to work within a dedicated mod loader, such as TML. However, at the time of writing, TML does not currently support Terraria 1.4, so we&rsquo;ll need to forge our own path. Fortunately for us, the systems we need to modify don&rsquo;t actually require any code <em>changes</em>, only additions, which opens some possibilities. The easiest way to inject our new code into Terraria is to produce a new C# application (the language in which Terraria is written), and use Terraria&rsquo;s executable as a reference. This way, we can add our code as a callback in Terraria&rsquo;s engine, and then invoke Terraria&rsquo;s normal entry point.</p>
+
+<p>Now for the unfun part. Before we can get started writing code, we need to first prepare our workspace a bit. In an attempt to remove some clutter, Terraria embeds most of its dependencies into the main executable, including a library called ReLogic.dll that contains the lighting system. Using dotPeek, we can open Terraria&rsquo;s executable (found in its install directory) and export these resources. In this case, we need to save Terraria.Libraries.ReLogic.ReLogic.dll as &ldquo;ReLogic.dll&rdquo; directly into Terraria&rsquo;s install folder.</p>
+
+<p><img class="center" src="/images/blog/ExportReLogic.png" title="&ldquo;Export ReLogic.dll&rdquo;" ></p>
+
+<p>With the library exported, we can move to Visual Studio. Once again, there are some unique setup steps required to ensure compatibility with Terraria.<br/>
+1. Create a new &ldquo;Console App (.NET Framework)&rdquo; project. Be sure to select &ldquo;.NET Framework 4&rdquo;.<br/>
+2. Once the project is loaded, open the project properties menu and navigate to the &ldquo;Build&rdquo; tab.<br/>
+3. Set &ldquo;Platform target&rdquo; to &ldquo;x86&rdquo;&lsquo;.
+4. Set &ldquo;Output path&rdquo; to Terraria&rsquo;s install directory. (This will simplify loading Terraria&rsquo;s other dependencies)
+5. From the Solution Explorer panel, add both Terrara.exe and ReLogic.dll as references to your project.</p>
+
+<h2>Creating a custom RgbDevice</h2>
+
+<p>With all of the preparation steps out of the way, we can finally look at the code involved.</p>
+
+<p>As outlined above, we&rsquo;ll need to create our own RgbDevice subclass in order to add the functionality we need. Let takes a look at some boilerplate code.</p>
+
+<pre><code class="c#">class MyRgbDevice : RgbDevice
+{
+    private static Fragment CreateFragment()
+    {
+        var gridPositions = new Point[150];
+        var canvasPositions = new Vector2[150];
+
+        for (var i = 0; i &lt; 150; i++)
+        {
+            gridPositions[i].X = i;
+            gridPositions[i].Y = 0;
+
+            // Dividing by 50 will make our LED strip considered
+            // roughly as long as a keyboard. 
+            canvasPositions[i].X = i / 50.0f;
+            canvasPositions[i].Y = 0;
+        }
+
+        return Fragment.FromCustom(gridPositions, canvasPositions);
+    }
+
+    public MyRgbDevice() :
+        base(RgbDeviceVendor.Unknown,
+             RgbDeviceType.Generic,
+             CreateFragment(),
+             new DeviceColorProfile())
+    {
+        PreferredLevelOfDetail = EffectDetailLevel.Low;
+    }
+
+    public override void Present()
+    {
+        for (int i = 0; i &lt; LedCount; i++)
+        {
+            var color = GetProcessedLedColor(i);
+            // Do something with color
+        }
+    }
+}
+</code></pre>
+
+<p>There&rsquo;s a few things going on here, but the one to start with is the <code>PreferredLevelOfDetail</code>.<br/>
+Because peripherals come in all shapes and sizes, there isn&rsquo;t really a &ldquo;one size fits all&rdquo; for most effects. While a keyboard has enough lights to show off a giant eyeball blinking at you, that effect would not translate well to a pair of headphones with two lights. As such, there are two versions of almost every effect in the game. One for high detail devices, such as keyboards, and another for low detail devices. Since we&rsquo;re starting with an LED strip, it&rsquo;s better to set our preferred detail level to low.</p>
+
+<p>Moving up, we can see there&rsquo;s a bit going on with the parent class&rsquo;s constructor. In fact, RgbDevice&rsquo;s constructor takes four arguments:</p>
+
+<pre><code class="c#">RgbDevice(
+    RgbDeviceVendor vendor,
+    RgbDeviceType type,
+    Fragment fragment,
+    DeviceColorProfile colorProfile);
+</code></pre>
+
+<p><code>vendor</code> and <code>type</code> are used for categorization. These are mostly irrelevant and we can generally pick Unknown/Generic. There is, however, an exception to this rule. A few effects not only require the device prefer a high level of detail, but they must also be a keyboard. This is typically for things that are meant to be centered on your lighting setup. If you&rsquo;re looking to display these without registering as a keyboard, you can set your vendor and type to Virtual.</p>
+
+<p><code>fragment</code> is where we define what LEDs we have and how they&rsquo;re positioned. Each pixel in a fragment is given two values: A canvas position and a grid position.<br/>
+<strong>Grid Position</strong> is an pair of X/Y integer values. It&rsquo;s typically used for effects that require a whole LED be lit up as opposed to smoothly transitioning to the neighboring LEDs. A good example of this is the rain effect, which has streaks of blue falling down columns of keys.<br/>
+<strong>Canvas Position</strong>, on the other hand, is a floating point based X/Y coordinate. Its position is normalized such that one unit is roughly equal to the height of a standard keyboard. This coordinate space is how effects are able to compensate for staggered layout of a keyboard, since keys do not fit neatly into a grid.</p>
+
+<p>Finally we have <code>colorProfile</code>, which acts as a global color multiplier. This was added to combat specific keyboard brands having strong blue tints to their lighting. For our use case, we can simply use a default constructed one.</p>
+
+<p>Down near the bottom of our code snippet, we have the <code>Present</code> function we&rsquo;ve overridden. This is what gets invoked after all effects have been precessed.</p>
+
+<h2>Communicating With A Remote Device</h2>
+
+<p>Now that the base of our new RgbDevice is set up, we can have it send color data to our microcontroller. Since I&rsquo;m using an ESP32, it seems only fitting to take advantage of the wireless functionality. If our microcontroller were to listen for UDP packets, the RgbDevice could simply stream all of the color data via the local network, and we wouldn&rsquo;t need to worry about serial ports or other more complicated connections.  Easy enough, C# has a UdpClient class for this exact purpose.</p>
+
+<p>By adding a member variable:
+<code>c#
+private UdpClient _udpClient;
+</code>
+And a bit of connection code to our constructor:
+<figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+</pre></td><td class='code'><pre><code class='c#'><span class='line'><span class="k">public</span> <span class="nf">MyRgbDevice</span><span class="p">()</span> <span class="p">:</span>
+</span><span class='line'>    <span class="k">base</span><span class="p">(</span><span class="n">RgbDeviceVendor</span><span class="p">.</span><span class="n">Unknown</span><span class="p">,</span>
+</span><span class='line'>            <span class="n">RgbDeviceType</span><span class="p">.</span><span class="n">Generic</span><span class="p">,</span>
+</span><span class='line'>            <span class="n">CreateFragment</span><span class="p">(),</span>
+</span><span class='line'>            <span class="k">new</span> <span class="nf">DeviceColorProfile</span><span class="p">())</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>    <span class="n">PreferredLevelOfDetail</span> <span class="p">=</span> <span class="n">EffectDetailLevel</span><span class="p">.</span><span class="n">Low</span><span class="p">;&lt;/</span><span class="n">p</span><span class="p">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="p">&lt;</span><span class="n">pre</span><span class="p">&gt;&lt;</span><span class="n">code</span><span class="p">&gt;</span><span class="n">_udpClient</span> <span class="p">=</span> <span class="k">new</span> <span class="n">UdpClient</span><span class="p">();</span>
+</span><span class='line'>
+</span><span class='line'><span class="c1">// Update this to the local IP of the ESP32.</span>
+</span><span class='line'><span class="n">_udpClient</span><span class="p">.</span><span class="n">Connect</span><span class="p">(</span><span class="n">IPAddress</span><span class="p">.</span><span class="n">Parse</span><span class="p">(</span><span class="s">&quot;10.0.0.173&quot;</span><span class="p">),</span> <span class="m">8585</span><span class="p">);</span>
+</span><span class='line'><span class="p">&lt;/</span><span class="n">code</span><span class="p">&gt;&lt;/</span><span class="n">pre</span><span class="p">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="p">&lt;</span><span class="n">p</span><span class="p">&gt;}</span>
+</span><span class='line'><span class="p">&lt;</span><span class="n">code</span><span class="p">&gt;</span>
+</span><span class='line'><span class="n">We</span><span class="err">&#39;</span><span class="n">re</span> <span class="n">now</span> <span class="n">able</span> <span class="n">to</span> <span class="n">connect</span> <span class="n">to</span> <span class="n">our</span> <span class="n">ESP32</span> <span class="n">on</span> <span class="n">port</span> <span class="m">8585.</span> <span class="n">From</span> <span class="n">there</span><span class="p">,</span> <span class="n">sending</span> <span class="n">to</span> <span class="n">our</span> <span class="n">remote</span> <span class="n">device</span> <span class="k">is</span> <span class="n">easy</span><span class="p">:</span>
+</span><span class='line'><span class="p">&lt;/</span><span class="n">code</span><span class="p">&gt;</span> <span class="n">c</span><span class="err">#</span>
+</span><span class='line'><span class="k">public</span> <span class="k">override</span> <span class="k">void</span> <span class="nf">Present</span><span class="p">()</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>    <span class="kt">byte</span><span class="p">[]</span> <span class="n">output</span> <span class="p">=</span> <span class="k">new</span> <span class="kt">byte</span><span class="p">[</span><span class="n">LedCount</span> <span class="p">*</span> <span class="m">3</span><span class="p">];&lt;/</span><span class="n">p</span><span class="p">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="p">&lt;</span><span class="n">pre</span><span class="p">&gt;&lt;</span><span class="n">code</span><span class="p">&gt;</span><span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="p">=</span> <span class="m">0</span><span class="p">;</span> <span class="n">i</span> <span class="p">&amp;</span><span class="n">lt</span><span class="p">;</span> <span class="n">LedCount</span><span class="p">;</span> <span class="n">i</span><span class="p">++)</span>
+</span><span class='line'><span class="p">{</span>
+</span><span class='line'>    <span class="kt">var</span> <span class="n">color</span> <span class="p">=</span> <span class="n">GetProcessedLedColor</span><span class="p">(</span><span class="n">i</span><span class="p">);</span>
+</span><span class='line'>    <span class="n">output</span><span class="p">[</span><span class="n">i</span> <span class="p">*</span> <span class="m">3</span> <span class="p">+</span> <span class="m">0</span><span class="p">]</span> <span class="p">=</span> <span class="p">(</span><span class="kt">byte</span><span class="p">)(</span><span class="n">color</span><span class="p">.</span><span class="n">X</span> <span class="p">*</span> <span class="m">255.0f</span><span class="p">);</span>
+</span><span class='line'>    <span class="n">output</span><span class="p">[</span><span class="n">i</span> <span class="p">*</span> <span class="m">3</span> <span class="p">+</span> <span class="m">1</span><span class="p">]</span> <span class="p">=</span> <span class="p">(</span><span class="kt">byte</span><span class="p">)(</span><span class="n">color</span><span class="p">.</span><span class="n">Y</span> <span class="p">*</span> <span class="m">255.0f</span><span class="p">);</span>
+</span><span class='line'>    <span class="n">output</span><span class="p">[</span><span class="n">i</span> <span class="p">*</span> <span class="m">3</span> <span class="p">+</span> <span class="m">2</span><span class="p">]</span> <span class="p">=</span> <span class="p">(</span><span class="kt">byte</span><span class="p">)(</span><span class="n">color</span><span class="p">.</span><span class="n">Z</span> <span class="p">*</span> <span class="m">255.0f</span><span class="p">);</span>
+</span><span class='line'><span class="p">}</span>
+</span><span class='line'>
+</span><span class='line'><span class="n">_udpClient</span><span class="p">.</span><span class="n">Send</span><span class="p">(</span><span class="n">output</span><span class="p">,</span> <span class="n">output</span><span class="p">.</span><span class="n">Length</span><span class="p">);</span>
+</span><span class='line'><span class="p">&lt;/</span><span class="n">code</span><span class="p">&gt;&lt;/</span><span class="n">pre</span><span class="p">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="p">&lt;</span><span class="n">p</span><span class="p">&gt;}</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>A complete version of our new RgbDevice class can be found <a href="https://gist.github.com/crbednarz/df5567e0757af914f7e78dc75bcb5b07">here</a>.<br/>
+It&rsquo;s worth noting that you will need to add XNA as a project reference. Visual Studio <em>should</em> pick up on this and prompt you when hovering over items with the missing reference. Otherwise you may need to dig into the XNA dll install location and add them manually.</p>
+
+<h2>Hooking Up The New RgbDevice</h2>
+
+<p>So we&rsquo;ve got our brand new RgbDevice ready, but we need to get it registered into Terraria somehow. Well, for better or worse, most of Terraria&rsquo;s initialization is done through static functions with global states. All we need to do use reflection to find the <code>ChromaEngine</code> object in the <code>ChromaInitializer</code> static class and register a new device.</p>
+
+<pre><code class="c#">class Program
+{
+    private static MyRgbDevice device = new MyRgbDevice();
+
+    private static void RegisterOurDevice()
+    {
+        var engine = (ChromaEngine)typeof(ChromaInitializer).GetField("_engine", BindingFlags.NonPublic | BindingFlags.Static).GetValue(null);
+        engine.AddDeviceGroup("LedStrip", new VirtualRgbDeviceGroup(device));
+        engine.EnableDeviceGroup("LedStrip");
+    }
+
+    public static void Main(string[] args)
+    {
+        // Invoke Terraria's Main for Windows-based systems.
+        typeof(WindowsLaunch).GetMethod("Main", BindingFlags.Static | BindingFlags.NonPublic).Invoke(null, new object[] { args });
+    }
+}
+</code></pre>
+
+<p>A word on device groups: Device groups are used for managing multiple devices with a shared backend API. Since we&rsquo;re only dealing with a single LED strip, we can use the provided virtual group, which will do nothing more than act as a container.</p>
+
+<p>You may notice that we haven&rsquo;t actually invoked <code>RegisterOurDevice()</code> anywhere. This is because doing so would cause our application to immediately crash. As mentioned earlier, Terraria embeds many of its dependencies into the main executable. In order to reference these during execution, it&rsquo;s got a bit of extra code which helps with assembly resolution. Unfortunately for us, there&rsquo;s no easy way to register a callback before this extra coe has run. We know it&rsquo;s <em>somewhere</em> after we invoke <code>WindowsLaunch.Main</code>, but every callback after that point is in a class that requires the assembly resolution code before you can reference is safely.</p>
+
+<p>While we could likely decompile Terraria further and attempt to replicate this functionality in our own main, the easier way is to simply add our hook to the one point we know we&rsquo;re safe to: After an embedded assembly is loaded.
+<code>c#
+AppDomain.CurrentDomain.AssemblyLoad += (sender, sargs) =&gt;
+{
+    if (sargs.LoadedAssembly.GetName().Name == "Newtonsoft.Json")
+        Terraria.Main.OnEngineLoad += RegisterOurDevice;
+};
+</code></p>
+
+<p>Newtonsoft.Json is a JSON library used for configuration files within Terraria, and the dll file for it is embedded within Terraria.exe. All we have to do is wait for that load to occur. Once it has, we can safely hook into a more reasonable spot in Terraria&rsquo;s engine.</p>
+
+<p>Again, a complete version of Program.cs can be found <a href="https://gist.github.com/crbednarz/33d5dc1ca782227ccc733e2b0f223efb">here</a>.</p>
+
+<h2>Connecting To Terraria</h2>
+
+<p>With everything on the client side in place, we can move to setting up our microcontroller. It would likely be far more performant to work with the esp-idf, for the sake of keep this short, we&rsquo;ll use the Arduino IDE with the ESP32 board package and both the WiFi and FastLED packages installed.</p>
+
+<p>Unlike the Terraria side, things are fairly straight-forward here. We simply need to connect to the wifi, and listen for UDP packets. Whenever we have enough data to fill all the lights, we read it all off and update our <code>leds</code> buffer.<br/>
+<figure class='code'><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
+<span class='line-number'>2</span>
+<span class='line-number'>3</span>
+<span class='line-number'>4</span>
+<span class='line-number'>5</span>
+<span class='line-number'>6</span>
+<span class='line-number'>7</span>
+<span class='line-number'>8</span>
+<span class='line-number'>9</span>
+<span class='line-number'>10</span>
+<span class='line-number'>11</span>
+<span class='line-number'>12</span>
+<span class='line-number'>13</span>
+<span class='line-number'>14</span>
+<span class='line-number'>15</span>
+<span class='line-number'>16</span>
+<span class='line-number'>17</span>
+<span class='line-number'>18</span>
+<span class='line-number'>19</span>
+<span class='line-number'>20</span>
+<span class='line-number'>21</span>
+<span class='line-number'>22</span>
+<span class='line-number'>23</span>
+<span class='line-number'>24</span>
+<span class='line-number'>25</span>
+<span class='line-number'>26</span>
+<span class='line-number'>27</span>
+<span class='line-number'>28</span>
+<span class='line-number'>29</span>
+<span class='line-number'>30</span>
+<span class='line-number'>31</span>
+<span class='line-number'>32</span>
+<span class='line-number'>33</span>
+<span class='line-number'>34</span>
+<span class='line-number'>35</span>
+<span class='line-number'>36</span>
+<span class='line-number'>37</span>
+<span class='line-number'>38</span>
+<span class='line-number'>39</span>
+<span class='line-number'>40</span>
+<span class='line-number'>41</span>
+<span class='line-number'>42</span>
+<span class='line-number'>43</span>
+<span class='line-number'>44</span>
+<span class='line-number'>45</span>
+<span class='line-number'>46</span>
+</pre></td><td class='code'><pre><code class='cpp'><span class='line'><span class="o">&lt;/</span><span class="n">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">h1</span><span class="o">&gt;</span><span class="n">include</span> <span class="o">&amp;</span><span class="n">lt</span><span class="p">;</span><span class="n">FastLED</span><span class="p">.</span><span class="n">h</span><span class="o">&gt;&lt;/</span><span class="n">h1</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">h1</span><span class="o">&gt;</span><span class="n">include</span> <span class="o">&amp;</span><span class="n">lt</span><span class="p">;</span><span class="n">WiFi</span><span class="p">.</span><span class="n">h</span><span class="o">&gt;&lt;/</span><span class="n">h1</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">h1</span><span class="o">&gt;</span><span class="n">define</span> <span class="n">PIN</span> <span class="mi">21</span><span class="o">&lt;/</span><span class="n">h1</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">h1</span><span class="o">&gt;</span><span class="n">define</span> <span class="n">NUM_LEDS</span> <span class="mi">150</span><span class="o">&lt;/</span><span class="n">h1</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">p</span><span class="o">&gt;</span><span class="n">CRGB</span> <span class="n">leds</span><span class="p">[</span><span class="n">NUM_LEDS</span><span class="p">];</span><span class="o">&lt;/</span><span class="n">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">p</span><span class="o">&gt;</span><span class="kt">char</span> <span class="n">ssid</span><span class="p">[]</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">&lt;</span><span class="n">NETWORK</span> <span class="n">NAME</span><span class="o">&gt;&amp;</span><span class="n">rdquo</span><span class="p">;;</span>
+</span><span class='line'><span class="kt">char</span> <span class="n">password</span><span class="p">[]</span> <span class="o">=</span> <span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="o">&lt;</span><span class="n">NETWORK</span> <span class="n">PASSWORD</span><span class="o">&gt;&amp;</span><span class="n">rdquo</span><span class="p">;;</span><span class="o">&lt;/</span><span class="n">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">p</span><span class="o">&gt;</span><span class="n">WiFiUDP</span> <span class="n">udp</span><span class="p">;</span>
+</span><span class='line'><span class="kt">int</span> <span class="n">port</span> <span class="o">=</span> <span class="mi">8585</span><span class="p">;</span><span class="o">&lt;/</span><span class="n">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">p</span><span class="o">&gt;</span><span class="kt">void</span> <span class="n">setup</span><span class="p">()</span> <span class="p">{</span>
+</span><span class='line'>  <span class="n">Serial</span><span class="p">.</span><span class="n">begin</span><span class="p">(</span><span class="mi">115200</span><span class="p">);</span><span class="o">&lt;/</span><span class="n">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">p</span><span class="o">&gt;</span>  <span class="kt">int</span> <span class="n">status</span> <span class="o">=</span> <span class="n">WL_IDLE_STATUS</span><span class="p">;</span>
+</span><span class='line'>  <span class="k">while</span> <span class="p">(</span><span class="n">status</span> <span class="o">!=</span> <span class="n">WL_CONNECTED</span><span class="p">)</span> <span class="p">{</span>
+</span><span class='line'>    <span class="n">status</span> <span class="o">=</span> <span class="n">WiFi</span><span class="p">.</span><span class="n">begin</span><span class="p">(</span><span class="n">ssid</span><span class="p">,</span> <span class="n">password</span><span class="p">);</span>
+</span><span class='line'>    <span class="n">delay</span><span class="p">(</span><span class="mi">1000</span><span class="p">);</span>
+</span><span class='line'>  <span class="p">}</span>
+</span><span class='line'>  <span class="n">WiFi</span><span class="p">.</span><span class="n">setSleep</span><span class="p">(</span><span class="nb">false</span><span class="p">);</span><span class="o">&lt;/</span><span class="n">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">p</span><span class="o">&gt;</span>  <span class="n">Serial</span><span class="p">.</span><span class="n">println</span><span class="p">(</span><span class="o">&amp;</span><span class="n">ldquo</span><span class="p">;</span><span class="n">Connected</span> <span class="n">to</span> <span class="n">Wifi</span><span class="o">&amp;</span><span class="n">rdquo</span><span class="p">;);</span><span class="o">&lt;/</span><span class="n">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">p</span><span class="o">&gt;</span>  <span class="n">udp</span><span class="p">.</span><span class="n">begin</span><span class="p">(</span><span class="n">port</span><span class="p">);</span><span class="o">&lt;/</span><span class="n">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">p</span><span class="o">&gt;</span>  <span class="n">FastLED</span><span class="p">.</span><span class="n">addLeds</span><span class="o">&amp;</span><span class="n">lt</span><span class="p">;</span><span class="n">NEOPIXEL</span><span class="p">,</span> <span class="n">PIN</span><span class="o">&gt;</span><span class="p">(</span><span class="n">leds</span><span class="p">,</span> <span class="n">NUM_LEDS</span><span class="p">);</span>
+</span><span class='line'><span class="p">}</span><span class="o">&lt;/</span><span class="n">p</span><span class="o">&gt;</span>
+</span><span class='line'>
+</span><span class='line'><span class="o">&lt;</span><span class="n">p</span><span class="o">&gt;</span><span class="kt">void</span> <span class="n">loop</span><span class="p">()</span> <span class="p">{</span>
+</span><span class='line'>  <span class="kt">int</span> <span class="n">packetSize</span> <span class="o">=</span> <span class="n">udp</span><span class="p">.</span><span class="n">parsePacket</span><span class="p">();</span>
+</span><span class='line'>  <span class="k">if</span> <span class="p">(</span><span class="n">packetSize</span> <span class="o">&gt;=</span> <span class="n">NUM_LEDS</span> <span class="o">*</span> <span class="mi">3</span><span class="p">)</span> <span class="p">{</span>
+</span><span class='line'>    <span class="k">for</span> <span class="p">(</span><span class="kt">int</span> <span class="n">i</span> <span class="o">=</span> <span class="mi">0</span><span class="p">;</span> <span class="n">i</span> <span class="o">&amp;</span><span class="n">lt</span><span class="p">;</span> <span class="n">NUM_LEDS</span><span class="p">;</span> <span class="n">i</span><span class="o">++</span><span class="p">)</span> <span class="p">{</span>
+</span><span class='line'>      <span class="n">leds</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">r</span>  <span class="o">=</span> <span class="n">udp</span><span class="p">.</span><span class="n">read</span><span class="p">();</span>
+</span><span class='line'>      <span class="n">leds</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">g</span>  <span class="o">=</span> <span class="n">udp</span><span class="p">.</span><span class="n">read</span><span class="p">();</span>
+</span><span class='line'>      <span class="n">leds</span><span class="p">[</span><span class="n">i</span><span class="p">].</span><span class="n">b</span>  <span class="o">=</span> <span class="n">udp</span><span class="p">.</span><span class="n">read</span><span class="p">();</span>
+</span><span class='line'>    <span class="p">}</span>
+</span><span class='line'>    <span class="n">FastLED</span><span class="p">.</span><span class="n">show</span><span class="p">();</span>
+</span><span class='line'>  <span class="p">}</span>
+</span><span class='line'><span class="p">}</span>
+</span></code></pre></td></tr></table></div></figure></p>
+
+<p>Once the code has been uploaded to our ESP32 board, we simply need to run our mod, and then press reset on the ESP32.</p>
+
+<h2>Showcase</h2>
+
+<p>The only light strip I had was already attached under my bed (for the sake of not stepping on cats in the middle of the night), but I&rsquo;d say it worked quite well:</p>
+
+<p><div class="embed-video-container"><iframe src="//www.youtube.com/embed/Ze1jE_3QTgU" allowfullscreen></iframe></div></p>
+
+<p>Taking things a step further, you can even display to an LED panel, but perhaps that&rsquo;s a post for another time.</p>
+
+<p><div class="embed-video-container"><iframe src="//www.youtube.com/embed/mBWGudeKXcc" allowfullscreen></iframe></div></p>
 ]]></content>
   </entry>
   
