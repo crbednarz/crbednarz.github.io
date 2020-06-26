@@ -4,7 +4,7 @@
   <title><![CDATA[Chris Bednarz]]></title>
   <link href="http://crbednarz.com/atom.xml" rel="self"/>
   <link href="http://crbednarz.com/"/>
-  <updated>2020-06-25T21:09:37-07:00</updated>
+  <updated>2020-06-25T21:29:54-07:00</updated>
   <id>http://crbednarz.com/</id>
   <author>
     <name><![CDATA[Chris Bednarz]]></name>
@@ -26,14 +26,14 @@
 <p>It&rsquo;s been two months since the final update for Terraria was released, and with it a variety of new content and features. Of those, there was one feature which I had worked on quite a bit during my time at Re-Logic which I had been patiently waiting to play with again: Peripheral Lighting. With this, Terraria is able to take control of various &ldquo;RGB&rdquo;-enabled devices such as keyboards, mice, and headsets, and update their colors depending on what&rsquo;s going on in the game.
 Perhaps the whole thing is a bit useless, but I&rsquo;ve always been a sucker for RGB lighting nonetheless.</p>
 
-<p>Unfortunately, since working on it I no longer have any supported devices. In fact, none of my various peripherals support any sort of host controlled lighting. But why should I limit myself to peripherals anyway? The system behind it certainly isn&rsquo;t aware of this constraint, so why can&rsquo;t I make my <em>own</em> RGB device? In theory, so long a device has controllable RGB LEDs, there&rsquo;s a way.</p>
+<p>Unfortunately, since working on it I no longer have any supported devices. In fact, none of my various peripherals support any sort of host controlled lighting. But why should I limit myself to peripherals anyway? The system behind it certainly isn&rsquo;t aware of this constraint, so why can&rsquo;t I make my <em>own</em> RGB device? In theory, so long as a device has controllable RGB LEDs, there&rsquo;s a way.</p>
 
 <p><strong>A word of warning:</strong><br/>
 This is by no means meant to be a comprehensive guide, but rather a starting point. I&rsquo;ll cover the key steps required to get things up and running, but things like polish and stability will be left for another time. Additionally, some knowledge of C#, and embedded devices is recommended.</p>
 
 <h1>Targeting A New Device</h1>
 
-<p>To start off simple, we&rsquo;ll look at what it would take to get a strip of ws2812b addressable LEDs working with Terraria. These are fairly common, cheap, and readily available on Amazon.
+<p>To start off simple, we&rsquo;ll look at what it would take to get a strip of WS2812B addressable LEDs working with Terraria. These are fairly common, cheap, and readily available on Amazon.
 Because I&rsquo;m working with what I have laying around, here are the main components I&rsquo;ll be using:</p>
 
 <ul>
@@ -68,7 +68,7 @@ Because I&rsquo;m working with what I have laying around, here are the main comp
 
 <h2>Preparations For Modifying Terraria</h2>
 
-<p>Typically it&rsquo;s much easier to work within a dedicated mod loader, such as TML. However, at the time of writing, TML does not currently support Terraria 1.4, so we&rsquo;ll need to forge our own path. Fortunately for us, the systems we need to modify don&rsquo;t actually require any code <em>changes</em>, only additions, which opens some possibilities. The easiest way to inject our new code into Terraria is to produce a new C# application (the language in which Terraria is written), and use Terraria&rsquo;s executable as a reference. This way, we can add our code as a callback in Terraria&rsquo;s engine, and then invoke Terraria&rsquo;s normal entry point.</p>
+<p>Typically it&rsquo;s much easier to work within a dedicated mod loader. However, at the time of writing, none exist that currently support Terraria 1.4, so we&rsquo;ll need to forge our own path. Fortunately for us, the systems we need to modify don&rsquo;t actually require any code <em>changes</em>, only additions, which opens some possibilities. The easiest way to inject our new code into Terraria is to produce a new C# application (the language in which Terraria is written), and use Terraria&rsquo;s executable as a reference. This way, we can add our code as a callback in Terraria&rsquo;s engine, and then invoke Terraria&rsquo;s normal entry point.</p>
 
 <p>Now for the unfun part. Before we can get started writing code, we need to first prepare our workspace a bit. In an attempt to remove some clutter, Terraria embeds most of its dependencies into the main executable, including a library called ReLogic.dll that contains the lighting system. Using dotPeek, we can open Terraria&rsquo;s executable (found in its install directory) and export these resources. In this case, we need to save Terraria.Libraries.ReLogic.ReLogic.dll as &ldquo;ReLogic.dll&rdquo; directly into Terraria&rsquo;s install folder.</p>
 
@@ -81,7 +81,7 @@ Because I&rsquo;m working with what I have laying around, here are the main comp
 4. Set &ldquo;Output path&rdquo; to Terraria&rsquo;s install directory. (This will simplify loading Terraria&rsquo;s other dependencies)
 5. From the Solution Explorer panel, add both Terrara.exe and ReLogic.dll as references to your project.</p>
 
-<h2>Creating a custom RgbDevice</h2>
+<h2>Creating A Custom RgbDevice</h2>
 
 <p>With all of the preparation steps out of the way, we can finally look at the code involved.</p>
 
@@ -276,7 +276,7 @@ It&rsquo;s worth noting that you will need to add XNA as a project reference. Vi
 
 <h2>Hooking Up The New RgbDevice</h2>
 
-<p>So we&rsquo;ve got our brand new RgbDevice ready, but we need to get it registered into Terraria somehow. Well, for better or worse, most of Terraria&rsquo;s initialization is done through static functions with global states. All we need to do use reflection to find the <code>ChromaEngine</code> object in the <code>ChromaInitializer</code> static class and register a new device.</p>
+<p>So we&rsquo;ve got our brand new RgbDevice ready, but we need to get it registered into Terraria somehow. Well, for better or worse, most of Terraria&rsquo;s initialization is done through static functions with global states. All we need to do is use reflection to find the <code>ChromaEngine</code> object in the <code>ChromaInitializer</code> static class and register a new device.</p>
 
 <figure class='code'><figcaption><span></span></figcaption><div class="highlight"><table><tr><td class="gutter"><pre class="line-numbers"><span class='line-number'>1</span>
 <span class='line-number'>2</span>
@@ -317,7 +317,7 @@ It&rsquo;s worth noting that you will need to add XNA as a project reference. Vi
 
 <p>A word on device groups: Device groups are used for managing multiple devices with a shared backend API. Since we&rsquo;re only dealing with a single LED strip, we can use the provided virtual group, which will do nothing more than act as a container.</p>
 
-<p>You may notice that we haven&rsquo;t actually invoked <code>RegisterOurDevice()</code> anywhere. This is because doing so would cause our application to immediately crash. As mentioned earlier, Terraria embeds many of its dependencies into the main executable. In order to reference these during execution, it&rsquo;s got a bit of extra code which helps with assembly resolution. Unfortunately for us, there&rsquo;s no easy way to register a callback before this extra coe has run. We know it&rsquo;s <em>somewhere</em> after we invoke <code>WindowsLaunch.Main</code>, but every callback after that point is in a class that requires the assembly resolution code before you can reference is safely.</p>
+<p>You may notice that we haven&rsquo;t actually invoked <code>RegisterOurDevice()</code> anywhere. This is because doing so would cause our application to immediately crash. As mentioned earlier, Terraria embeds many of its dependencies into the main executable. In order to reference these during execution, it&rsquo;s got a bit of extra code which helps with assembly resolution. Unfortunately for us, there&rsquo;s no easy way to register a callback before this extra code has run. We know it&rsquo;s <em>somewhere</em> after we invoke <code>WindowsLaunch.Main</code>, but every callback after that point is in a class that requires the assembly resolution code before you can reference it safely.</p>
 
 <p>While we could likely decompile Terraria further and attempt to replicate this functionality in our own main, the easier way is to simply add our hook to the one point we know we&rsquo;re safe to: After an embedded assembly is loaded.</p>
 
@@ -340,7 +340,7 @@ It&rsquo;s worth noting that you will need to add XNA as a project reference. Vi
 
 <h2>Connecting To Terraria</h2>
 
-<p>With everything on the client side in place, we can move to setting up our microcontroller. It would likely be far more performant to work with the esp-idf, for the sake of keep this short, we&rsquo;ll use the Arduino IDE with the ESP32 board package and both the WiFi and FastLED packages installed.</p>
+<p>With everything on the client side in place, we can move to setting up our microcontroller. It would likely be far more performant to work with the esp-idf, for the sake of keeping this short, we&rsquo;ll use the Arduino IDE with the ESP32 board package and both the WiFi and FastLED packages installed.</p>
 
 <p>Unlike the Terraria side, things are fairly straight-forward here. We simply need to connect to the wifi, and listen for UDP packets. Whenever we have enough data to fill all the lights, we read it all off and update our <code>leds</code> buffer.</p>
 
